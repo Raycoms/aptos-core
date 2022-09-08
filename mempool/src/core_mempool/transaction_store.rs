@@ -119,18 +119,6 @@ impl TransactionStore {
         }
     }
 
-    /// Fetch mempool transaction by account address + sequence_number.
-    pub(crate) fn get_mempool_txn(
-        &self,
-        address: &AccountAddress,
-        sequence_number: u64,
-    ) -> Option<MempoolTransaction> {
-        self.transactions
-            .get(address)
-            .and_then(|txns| txns.get(&sequence_number))
-            .cloned()
-    }
-
     /// Insert transaction into TransactionStore. Performs validation checks and updates indexes.
     pub(crate) fn insert(&mut self, txn: MempoolTransaction) -> MempoolStatus {
         let address = txn.get_sender();
@@ -486,10 +474,9 @@ impl TransactionStore {
     pub(crate) fn gc_by_system_ttl(
         &mut self,
         metrics_cache: &TtlCache<(AccountAddress, u64), SystemTime>,
+        gc_time: Duration,
     ) {
-        let now = aptos_infallible::duration_since_epoch();
-
-        self.gc(now, true, metrics_cache);
+        self.gc(gc_time, true, metrics_cache);
     }
 
     /// Garbage collect old transactions based on client-specified expiration time.

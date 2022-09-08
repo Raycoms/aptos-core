@@ -44,8 +44,8 @@ impl Mempool {
     pub fn new(config: &NodeConfig) -> Self {
         Mempool {
             transactions: TransactionStore::new(&config.mempool),
-            sequence_number_cache: TtlCache::new(config.mempool.capacity, Duration::from_secs(100)),
-            metrics_cache: TtlCache::new(config.mempool.capacity, Duration::from_secs(100)),
+            sequence_number_cache: TtlCache::new(config.mempool.capacity),
+            metrics_cache: TtlCache::new(config.mempool.capacity),
             system_transaction_timeout: Duration::from_secs(
                 config.mempool.system_transaction_timeout_secs,
             ),
@@ -82,26 +82,12 @@ impl Mempool {
                     .reject_transaction(sender, sequence_number);
             }
         } else {
-            let new_seq_number = max(current_seq_number, sequence_number + 1);
-            self.sequence_number_cache.insert(*sender, new_seq_number);
-
-            let new_seq_number = if let Some(mempool_transaction) =
-                self.transactions.get_mempool_txn(sender, sequence_number)
-            {
-                match mempool_transaction
-                    .sequence_info
-                    .account_sequence_number_type
-                {
-                    AccountSequenceInfo::Sequential(_) => {
-                        AccountSequenceInfo::Sequential(new_seq_number)
-                    }
-                }
-            } else {
-                AccountSequenceInfo::Sequential(new_seq_number)
-            };
-            // update current cached sequence number for account
+            let new_seq_number =
+                AccountSequenceInfo::Sequential(max(current_seq_number, sequence_number + 1));
+            let expiration_time =
+                aptos_infallible::duration_since_epoch() + self.system_transaction_timeout;
             self.sequence_number_cache
-                .insert(*sender, new_seq_number.min_seq());
+                .insert(*sender, new_seq_number.min_seq(), expiration_time);
             self.transactions.commit_transaction(sender, new_seq_number);
         }
     }
@@ -141,8 +127,10 @@ impl Mempool {
                 cached_value.map_or(db_sequence_number, |value| max(*value, db_sequence_number)),
             ),
         };
+        let expiration_time =
+            aptos_infallible::duration_since_epoch() + self.system_transaction_timeout;
         self.sequence_number_cache
-            .insert(txn.sender(), sequence_number.min_seq());
+            .insert(txn.sender(), sequence_number.min_seq(), expiration_time);
 
         // don't accept old transactions (e.g. seq is less than account's current seq_number)
         if txn.sequence_number() < sequence_number.min_seq() {
@@ -153,11 +141,12 @@ impl Mempool {
             ));
         }
 
-        let expiration_time =
-            aptos_infallible::duration_since_epoch() + self.system_transaction_timeout;
         if timeline_state != TimelineState::NonQualified {
-            self.metrics_cache
-                .insert((txn.sender(), txn.sequence_number()), SystemTime::now());
+            self.metrics_cache.insert(
+                (txn.sender(), txn.sequence_number()),
+                SystemTime::now(),
+                expiration_time,
+            );
         }
 
         let txn_info = MempoolTransaction::new(
@@ -263,8 +252,8 @@ impl Mempool {
     /// Removes all expired transactions and clears expired entries in metrics
     /// cache and sequence number cache.
     pub(crate) fn gc(&mut self) {
-        let now = SystemTime::now();
-        self.transactions.gc_by_system_ttl(&self.metrics_cache);
+        let now = aptos_infallible::duration_since_epoch();
+        self.transactions.gc_by_system_ttl(&self.metrics_cache, now);
         self.metrics_cache.gc(now);
         self.sequence_number_cache.gc(now);
     }

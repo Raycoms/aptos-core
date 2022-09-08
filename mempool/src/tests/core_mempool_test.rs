@@ -12,10 +12,7 @@ use aptos_config::config::NodeConfig;
 use aptos_crypto::HashValue;
 use aptos_types::mempool_status::MempoolStatusCode;
 use aptos_types::{account_config::AccountSequenceInfo, transaction::SignedTransaction};
-use std::{
-    collections::HashSet,
-    time::{Duration, SystemTime},
-};
+use std::{collections::HashSet, time::Duration};
 
 #[test]
 fn test_transaction_ordering_only_seqnos() {
@@ -491,25 +488,23 @@ fn test_clean_stuck_transactions() {
 
 #[test]
 fn test_ttl_cache() {
-    let mut cache = TtlCache::new(2, Duration::from_secs(1));
+    let mut cache = TtlCache::new(2);
     // Test basic insertion.
-    cache.insert(1, 1);
-    cache.insert(1, 2);
-    cache.insert(2, 2);
-    cache.insert(1, 3);
+    cache.insert(1, 1, Duration::from_millis(1));
+    cache.insert(1, 2, Duration::from_millis(2));
+    cache.insert(2, 2, Duration::from_millis(3));
+    cache.insert(1, 3, Duration::from_millis(4));
     assert_eq!(cache.get(&1), Some(&3));
     assert_eq!(cache.get(&2), Some(&2));
     assert_eq!(cache.size(), 2);
     // Test reaching max capacity.
-    cache.insert(3, 3);
+    cache.insert(3, 3, Duration::from_millis(5));
     assert_eq!(cache.size(), 2);
     assert_eq!(cache.get(&1), Some(&3));
     assert_eq!(cache.get(&3), Some(&3));
     assert_eq!(cache.get(&2), None);
     // Test ttl functionality.
-    cache.gc(SystemTime::now()
-        .checked_add(Duration::from_secs(10))
-        .unwrap());
+    cache.gc(Duration::from_secs(1));
     assert_eq!(cache.size(), 0);
 }
 
