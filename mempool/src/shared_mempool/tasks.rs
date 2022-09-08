@@ -400,9 +400,31 @@ pub(crate) fn process_quorum_store_request<V: TransactionValidation>(
                 // gc before pulling block as extra protection against txns that may expire in consensus
                 // Note: this gc operation relies on the fact that consensus uses the system time to determine block timestamp
                 let curr_time = aptos_infallible::duration_since_epoch();
-                mempool.gc_by_expiration_time(curr_time);
+                mempool.gc_by_expiration_time(curr_time + Duration::from_secs(20));
                 let max_txns = cmp::max(max_txns, 1);
                 txns = mempool.get_batch(max_txns, max_bytes, exclude_transactions);
+
+                if !txns.is_empty() {
+                    let mut sum = 0_u64;
+                    let mut min = u64::MAX;
+                    for txn in &txns {
+                        let expiry_time = txn.expiration_timestamp_secs();
+                        if expiry_time < curr_time.as_secs() + 20 {
+                            error!(
+                                "Low expiration returned after GC: {} , curr time: {}",
+                                expiry_time,
+                                curr_time.as_secs()
+                            );
+                        }
+                        sum += expiry_time - curr_time.as_secs();
+                        min = min.min(expiry_time - curr_time.as_secs());
+                    }
+                    info!(
+                        "Average expiration time from mempool batch is: {}, minimum is: {}",
+                        sum / txns.len() as u64,
+                        min
+                    );
+                }
             }
             counters::mempool_service_transactions(counters::GET_BLOCK_LABEL, txns.len());
 
