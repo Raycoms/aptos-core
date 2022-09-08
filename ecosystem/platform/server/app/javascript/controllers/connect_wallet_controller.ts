@@ -20,11 +20,9 @@ export default class extends Controller<HTMLFormElement> {
 
   static values = {
     requiredNetwork: String,
-    walletPersisted: Boolean,
   };
 
   declare readonly requiredNetworkValue: string | null;
-  declare readonly walletPersistedValue: boolean;
 
   get walletName() {
     if ("aptos" in window) {
@@ -35,13 +33,6 @@ export default class extends Controller<HTMLFormElement> {
       // TODO: Add more wallet detection logic here.
     } else {
       throw "Aptos wallet not detected.";
-    }
-  }
-
-  onPageLoad() {
-    const urlParams = new URLSearchParams(location.search);
-    if (urlParams.get("wallet") && !this.walletPersistedValue) {
-      this.element.requestSubmit();
     }
   }
 
@@ -149,18 +140,18 @@ export default class extends Controller<HTMLFormElement> {
       },
       body: formData,
     });
-    const { created } = await response.json();
-    if (created) {
-      const urlParams = new URLSearchParams(location.search);
-      urlParams.set("wallet", publicKey);
-      const url = new URL(location.href);
-      url.search = urlParams.toString();
 
-      // Full page load instead of Turbo.visit due to bug with controller not
-      // being mounted.
-      location.href = url.toString();
-    } else {
-      console.error("connect wallet failed");
+    const { created } = await response.json();
+    if (!created) {
+      throw "connect wallet failed";
     }
+
+    const urlParams = new URLSearchParams(location.search);
+    urlParams.set("wallet", publicKey);
+    const url = new URL(location.href);
+    url.search = urlParams.toString();
+
+    // @ts-ignore
+    Turbo.visit(url.toString());
   }
 }

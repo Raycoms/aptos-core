@@ -68,9 +68,8 @@ export default class extends Controller<HTMLAnchorElement> {
     const url = new URL(location.href);
     url.search = `?txn=${hash}`;
 
-    // Full page load instead of Turbo.visit due to bug with controller not
-    // being mounted.
-    location.href = url.toString();
+    // @ts-ignore
+    Turbo.visit(url.toString());
   }
 
   async handleClick(event: Event) {
