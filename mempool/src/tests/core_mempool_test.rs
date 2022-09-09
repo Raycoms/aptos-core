@@ -206,20 +206,6 @@ fn test_commit_callback() {
 }
 
 #[test]
-fn test_sequence_number_cache() {
-    // Checks potential race where StateDB is lagging.
-    let mut pool = setup_mempool().0;
-    // Callback from consensus should set current sequence number for account.
-    pool.remove_transaction(&TestTransaction::get_address(1), 5, false);
-
-    // Try to add transaction with sequence number 6 to pool (while last known executed transaction
-    // for AC is 0).
-    add_txns_to_mempool(&mut pool, vec![TestTransaction::new(1, 6, 1)]);
-    // Verify that we can execute transaction 6.
-    assert_eq!(pool.get_batch(1, 1024, HashSet::new()).len(), 1);
-}
-
-#[test]
 fn test_reset_sequence_number_on_failure() {
     let mut pool = setup_mempool().0;
     // Add two transactions for account.
