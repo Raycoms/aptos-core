@@ -185,6 +185,10 @@ fn test_system_ttl() {
     mempool.gc();
     let batch = mempool.get_batch(1, 1024, HashSet::new());
     assert_eq!(vec![transaction.make_signed_transaction()], batch);
+
+    // TTL cache sizes should match the size of transaction store.
+    assert_eq!(mempool.sequence_number_cache.size(), 1);
+    assert_eq!(mempool.metrics_cache.size(), 1);
 }
 
 #[test]

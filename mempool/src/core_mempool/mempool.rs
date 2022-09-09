@@ -32,7 +32,7 @@ pub struct Mempool {
     // Stores the metadata of all transactions in mempool (of all states).
     transactions: TransactionStore,
 
-    sequence_number_cache: TtlCache<AccountAddress, u64>,
+    pub(crate) sequence_number_cache: TtlCache<AccountAddress, u64>,
     // For each transaction, an entry with a timestamp is added when the transaction enters mempool.
     // This is used to measure e2e latency of transactions in the system, as well as the time it
     // takes to pick it up by consensus.
