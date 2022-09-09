@@ -58,7 +58,7 @@ const GAS_AMOUNT: u64 = 1000;
 // account sequence numbers). If these fail, the whole test fails. We do not use
 // this for submitting transactions, as we have a way to handle when that fails.
 // This retry policy means an operation will take 8 seconds at most.
-static RETRY_POLICY: Lazy<RetryPolicy> = Lazy::new(|| {
+pub static RETRY_POLICY: Lazy<RetryPolicy> = Lazy::new(|| {
     RetryPolicy::exponential(Duration::from_millis(125))
         .with_max_retries(6)
         .with_jitter(true)

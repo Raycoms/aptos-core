@@ -182,6 +182,14 @@ fn main() -> Result<()> {
     let duration = Duration::from_secs(args.duration_secs as u64);
     let suite_name: &str = args.suite.as_ref();
 
+    let suite_name = if suite_name == "compat" {
+        "failures_catching_up"
+    } else {
+        "slow_processing_catching_up"
+    };
+
+    let duration = Duration::from_secs(1800);
+
     let runtime = Runtime::new()?;
     match args.cli_cmd {
         // cmd input for test
@@ -597,6 +605,36 @@ fn single_test_suite(test_name: &str) -> Result<ForgeConfig<'static>> {
             },
             false,
         ),
+        "slow_processing_catching_up" => changing_working_quorum_test(
+            10,
+            300,
+            4000,
+            3000,
+            &ChangingWorkingQuorumTest {
+                min_tps: 2000,
+                always_healthy_nodes: 2,
+                max_down_nodes: 0,
+                num_large_validators: 2,
+                add_execution_delay: true,
+                check_period_s: 57,
+            },
+            true,
+        ),
+        "failures_catching_up" => changing_working_quorum_test(
+            10,
+            300,
+            4000,
+            3000,
+            &ChangingWorkingQuorumTest {
+                min_tps: 2000,
+                always_healthy_nodes: 2,
+                max_down_nodes: 4,
+                num_large_validators: 2,
+                add_execution_delay: false,
+                check_period_s: 57,
+            },
+            true,
+        ),
         _ => return Err(format_err!("Invalid --suite given: {:?}", test_name)),
     };
     Ok(single_test_suite)
@@ -742,7 +780,7 @@ fn changing_working_quorum_test(
             EmitJobRequest::default()
                 .mode(if max_load {
                     EmitJobMode::MaxLoad {
-                        mempool_backlog: 20000,
+                        mempool_backlog: 30000,
                     }
                 } else {
                     EmitJobMode::ConstTps { tps: target_tps }

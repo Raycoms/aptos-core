@@ -150,8 +150,6 @@ impl NetworkTest for dyn NetworkLoadTest {
             .expect("Time went backwards")
             .as_secs();
 
-        ctx.check_for_success(&txn_stat, &actual_test_duration)?;
-
         self.finish(ctx.swarm(), start_timestamp, end_timestamp)?;
 
         Ok(())
