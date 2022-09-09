@@ -119,6 +119,12 @@ impl TransactionStore {
         }
     }
 
+    pub(crate) fn exists(&self, address: &AccountAddress) -> bool {
+        self.transactions
+            .get(address)
+            .map_or_else(|| false, |transactions| !transactions.is_empty())
+    }
+
     /// Insert transaction into TransactionStore. Performs validation checks and updates indexes.
     pub(crate) fn insert(&mut self, txn: MempoolTransaction) -> MempoolStatus {
         let address = txn.get_sender();

@@ -86,9 +86,15 @@ impl Mempool {
                 AccountSequenceInfo::Sequential(max(current_seq_number, sequence_number + 1));
             let expiration_time =
                 aptos_infallible::duration_since_epoch() + self.system_transaction_timeout;
-            self.sequence_number_cache
-                .insert(*sender, new_seq_number.min_seq(), expiration_time);
             self.transactions.commit_transaction(sender, new_seq_number);
+            // only insert cached sequence number for account if there are remaining transactions
+            if self.transactions.exists(sender) {
+                self.sequence_number_cache.insert(
+                    *sender,
+                    new_seq_number.min_seq(),
+                    expiration_time,
+                );
+            }
         }
     }
 
