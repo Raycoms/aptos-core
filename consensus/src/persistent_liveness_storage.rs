@@ -6,9 +6,9 @@ use anyhow::{format_err, Context, Result};
 use aptos_config::config::NodeConfig;
 use aptos_crypto::HashValue;
 use aptos_logger::prelude::*;
-use aptos_types::proof::TransactionAccumulatorSummary;
 use aptos_types::{
-    epoch_change::EpochChangeProof, ledger_info::LedgerInfoWithSignatures, transaction::Version,
+    epoch_change::EpochChangeProof, ledger_info::LedgerInfoWithSignatures,
+    proof::TransactionAccumulatorSummary, transaction::Version,
 };
 use consensus_types::{
     block::Block, quorum_cert::QuorumCert, timeout_2chain::TwoChainTimeoutCertificate, vote::Vote,
@@ -285,7 +285,14 @@ impl RecoveryData {
                 false
             }
         });
-        quorum_certs.retain(|qc| tree.contains(&qc.certified_block().id()));
+        quorum_certs.retain(|qc| {
+            if tree.contains(&qc.certified_block().id()) {
+                true
+            } else {
+                to_remove.push(qc.certified_block().id());
+                false
+            }
+        });
         to_remove
     }
 }
