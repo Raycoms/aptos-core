@@ -122,12 +122,6 @@ impl TransactionStore {
         }
     }
 
-    pub(crate) fn exists(&self, address: &AccountAddress) -> bool {
-        self.transactions
-            .get(address)
-            .map_or_else(|| false, |transactions| !transactions.is_empty())
-    }
-
     pub(crate) fn remove(
         &mut self,
         sender: &AccountAddress,

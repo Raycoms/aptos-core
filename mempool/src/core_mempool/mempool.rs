@@ -23,7 +23,6 @@ use aptos_types::{
     transaction::SignedTransaction,
 };
 use std::{
-    cmp::max,
     collections::HashSet,
     time::{Duration, SystemTime},
 };
