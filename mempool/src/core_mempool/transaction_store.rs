@@ -22,6 +22,7 @@ use aptos_types::{
     mempool_status::{MempoolStatus, MempoolStatusCode},
     transaction::SignedTransaction,
 };
+use std::cmp::max;
 use std::mem::size_of;
 use std::{
     collections::HashMap,
@@ -39,6 +40,7 @@ pub const TXN_INDEX_ESTIMATED_BYTES: usize = size_of::<crate::core_mempool::inde
 pub struct TransactionStore {
     // main DS
     transactions: HashMap<AccountAddress, AccountTransactions>,
+    sequence_numbers: HashMap<AccountAddress, u64>,
 
     // indexes
     priority_index: PriorityIndex,
@@ -74,6 +76,7 @@ impl TransactionStore {
         Self {
             // main DS
             transactions: HashMap::new(),
+            sequence_numbers: HashMap::new(),
 
             // various indexes
             system_ttl_index: TTLIndex::new(Box::new(|t: &MempoolTransaction| t.expiration_time)),
@@ -123,6 +126,38 @@ impl TransactionStore {
         self.transactions
             .get(address)
             .map_or_else(|| false, |transactions| !transactions.is_empty())
+    }
+
+    pub(crate) fn remove(
+        &mut self,
+        sender: &AccountAddress,
+        sequence_number: u64,
+        is_rejected: bool,
+    ) {
+        let current_seq_number = self.sequence_numbers.get(sender).map_or(0, |v| *v);
+        if is_rejected {
+            if sequence_number >= current_seq_number {
+                self.reject_transaction(sender, sequence_number);
+            }
+        } else {
+            let new_seq_number =
+                AccountSequenceInfo::Sequential(max(current_seq_number, sequence_number + 1));
+            self.sequence_numbers
+                .insert(*sender, new_seq_number.min_seq());
+            self.commit_transaction(sender, new_seq_number);
+        }
+    }
+
+    pub(crate) fn get_sequence_number(&self, address: &AccountAddress) -> Option<&u64> {
+        self.sequence_numbers.get(address)
+    }
+
+    /// Only update if a previous sequence number exists
+    pub(crate) fn update_sequence_number(&mut self, address: AccountAddress, sequence_number: u64) {
+        if let Some(previous) = self.sequence_numbers.get(&address) {
+            self.sequence_numbers
+                .insert(address, max(*previous, sequence_number));
+        }
     }
 
     /// Insert transaction into TransactionStore. Performs validation checks and updates indexes.
@@ -206,17 +241,19 @@ impl TransactionStore {
             }
 
             // insert into storage and other indexes
+            let sender = txn.get_sender();
             self.system_ttl_index.insert(&txn);
             self.expiration_time_index.insert(&txn);
             self.hash_index.insert(
                 txn.get_committed_hash(),
-                (
-                    txn.get_sender(),
-                    sequence_number.transaction_sequence_number,
-                ),
+                (sender, sequence_number.transaction_sequence_number),
             );
             let txn_size_bytes = txn.get_estimated_bytes();
             txns.insert(sequence_number.transaction_sequence_number, txn);
+            self.sequence_numbers.insert(
+                sender,
+                sequence_number.account_sequence_number_type.min_seq(),
+            );
             self.size_bytes += txn_size_bytes;
             self.track_indices();
         }
@@ -412,6 +449,7 @@ impl TransactionStore {
                 self.index_remove(transaction);
             }
             debug!(LogSchema::new(LogEntry::CleanRejectedTxn).txns(txns_log));
+            self.sequence_numbers.remove(account);
         }
     }
 
