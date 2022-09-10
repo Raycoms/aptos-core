@@ -453,6 +453,13 @@ impl BufferItem {
         }
     }
 
+    pub fn unwrap_aggregated_ref(&self) -> &AggregatedItem {
+        match self {
+            BufferItem::Aggregated(item) => item.as_ref(),
+            _ => panic!("Not aggregated item"),
+        }
+    }
+
     pub fn unwrap_aggregated(self) -> AggregatedItem {
         match self {
             BufferItem::Aggregated(item) => *item,

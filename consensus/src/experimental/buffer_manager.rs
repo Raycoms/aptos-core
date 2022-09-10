@@ -408,11 +408,23 @@ impl BufferManager {
             if item.is_executed() {
                 // we have found the buffer item
                 let signed_item = item.advance_to_signed(self.author, signature);
+                let maybe_proposer = signed_item
+                    .unwrap_signed_ref()
+                    .executed_blocks
+                    .last()
+                    .unwrap()
+                    .block()
+                    .author();
                 let commit_vote = signed_item.unwrap_signed_ref().commit_vote.clone();
 
                 self.buffer.set(&current_cursor, signed_item);
-
-                self.commit_msg_tx.broadcast_commit_vote(commit_vote).await;
+                if let Some(proposer) = maybe_proposer {
+                    self.commit_msg_tx
+                        .send_commit_vote(commit_vote, proposer)
+                        .await;
+                } else {
+                    self.commit_msg_tx.broadcast_commit_vote(commit_vote).await;
+                }
             } else {
                 self.buffer.set(&current_cursor, item);
             }
@@ -422,7 +434,7 @@ impl BufferManager {
     /// process the commit vote messages
     /// it scans the whole buffer for a matching blockinfo
     /// if found, try advancing the item to be aggregated
-    fn process_commit_message(&mut self, commit_msg: VerifiedEvent) -> Option<HashValue> {
+    async fn process_commit_message(&mut self, commit_msg: VerifiedEvent) -> Option<HashValue> {
         match commit_msg {
             VerifiedEvent::CommitVote(vote) => {
                 // find the corresponding item
@@ -440,6 +452,16 @@ impl BufferManager {
                             item
                         }
                     };
+                    if new_item.is_aggregated()
+                        && new_item.get_blocks().last().unwrap().block().author()
+                            == Some(self.author)
+                    {
+                        self.commit_msg_tx
+                            .broadcast_commit_proof(
+                                new_item.unwrap_aggregated_ref().commit_proof.clone(),
+                            )
+                            .await
+                    }
                     self.buffer.set(&current_cursor, new_item);
                     if self.buffer.get(&current_cursor).is_aggregated() {
                         return Some(target_block_id);
@@ -529,7 +551,7 @@ impl BufferManager {
                     self.advance_signing_root().await;
                 },
                 commit_msg = self.commit_msg_rx.select_next_some() => {
-                    if let Some(aggregated_block_id) = self.process_commit_message(commit_msg) {
+                    if let Some(aggregated_block_id) = self.process_commit_message(commit_msg).await {
                         self.advance_head(aggregated_block_id).await;
                         if self.execution_root.is_none() {
                             self.advance_execution_root().await;
