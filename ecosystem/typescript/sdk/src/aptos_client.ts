@@ -1,7 +1,7 @@
 // Copyright (c) Aptos
 // SPDX-License-Identifier: Apache-2.0
 
-import { Memoize } from "typescript-memoize";
+import { Memoize, clear } from "typescript-memoize";
 import { HexString, MaybeHexString } from "./hex_string";
 import { fixNodeUrl, sleep } from "./util";
 import { AptosAccount } from "./aptos_account";
@@ -12,14 +12,25 @@ import {
   BCS,
   TransactionBuilderRemoteABI,
   RemoteABIBuilderConfig,
+  TypeTagParser,
 } from "./transaction_builder";
+import {
+  TypeTag,
+  TypeTagAddress,
+  TypeTagBool,
+  TypeTagStruct,
+  TypeTagU128,
+  TypeTagU64,
+  TypeTagU8,
+  TypeTagVector,
+} from "./transaction_builder/aptos_types";
 
 /**
  * Provides methods for retrieving data from Aptos node.
  * For more detailed API specification see {@link https://fullnode.devnet.aptoslabs.com/v1/spec}
  */
 export class AptosClient {
-  client: Gen.AptosGeneratedClient;
+  private readonly config: Partial<Gen.OpenAPIConfig>;
 
   /**
    * Build a client configured to connect to an Aptos node at the given URL.
@@ -41,7 +52,130 @@ export class AptosClient {
     } else {
       conf.BASE = fixNodeUrl(nodeUrl);
     }
-    this.client = new Gen.AptosGeneratedClient(conf);
+    this.config = conf;
+  }
+
+  get client() {
+    return this.getClient(this.config);
+  }
+
+  private getClient(config?: Partial<Gen.OpenAPIConfig>): Gen.AptosGeneratedClient {
+    // To avoid an extra copy, we intentionally allw `reassign` to function parameters here
+    // eslint-disable-next-line no-param-reassign
+    config.BASE = this.config.BASE;
+    return new Gen.AptosGeneratedClient(config);
+  }
+
+  clearCache() {
+    clear(["abi"]);
+  }
+
+  // Cache for 10 minutes
+  @Memoize({ tags: ["abi"], expiring: 10 * 60 * 1000 })
+  private async fetchABI(address: string) {
+    const modules = await this.getAccountModules(address);
+    const structs = modules
+      .map((module) => module.abi)
+      .flatMap((abi) =>
+        abi.structs.map((s) => ({
+          fullName: `${HexString.ensure(abi.address).toShortString()}::${abi.name}::${s.name}`,
+          ...s,
+        })),
+      );
+    const structMap = new Map<string, Gen.MoveStruct>();
+    structs.forEach((s) => {
+      structMap.set(s.fullName, s);
+    });
+
+    return structMap;
+  }
+
+  private async fetchABICascaded(address: string, result: Map<string, Gen.MoveStruct>) {
+    const structFields: TypeTagStruct[] = [];
+    const structMap = await this.fetchABI(address);
+
+    structMap.forEach((val, key) => {
+      result.set(key, val);
+      val.fields.forEach((f) => {
+        try {
+          let typeTag = new TypeTagParser(f.type).parseTypeTag({ skipTypeArg: true });
+          while (typeTag instanceof TypeTagVector) {
+            typeTag = typeTag.value;
+          }
+
+          if (typeTag instanceof TypeTagStruct) {
+            structFields.push(typeTag);
+          }
+          // eslint-disable-next-line no-empty
+        } catch (e) {}
+      });
+    });
+
+    structFields.forEach(async (s) => {
+      const structTag = s.value;
+      const structAddress = HexString.fromUint8Array(structTag.address.address).toShortString();
+      if (!structMap.has(s.fullName)) {
+        await this.fetchABICascaded(structAddress, result);
+      }
+    });
+  }
+
+  private isTypeTagString(typeTag: TypeTagStruct) {
+    const { address, module_name: moduleName, name } = typeTag.value;
+    return (
+      `${HexString.fromUint8Array(address.address).toShortString()}::${moduleName.value}::${name.value}` ===
+      "0x1::string::String"
+    );
+  }
+
+  private decodeBCSVal(de: BCS.Deserializer, typeTag: TypeTag): any {
+    if (typeTag instanceof TypeTagU8) {
+      return de.deserializeU8().toString();
+    }
+    if (typeTag instanceof TypeTagU64) {
+      return de.deserializeU64().toString();
+    }
+    if (typeTag instanceof TypeTagU128) {
+      return de.deserializeU128().toString();
+    }
+    if (typeTag instanceof TypeTagBool) {
+      return de.deserializeBool();
+    }
+    if (typeTag instanceof TypeTagAddress) {
+      return HexString.fromUint8Array(de.deserializeFixedBytes(32)).toShortString();
+    }
+    if (typeTag instanceof TypeTagVector) {
+      if (typeTag.value instanceof TypeTagU8) {
+        return HexString.fromUint8Array(de.deserializeBytes()).hex();
+      }
+
+      return this.decodeBCSVal(de, typeTag.value);
+    }
+    if (typeTag instanceof TypeTagStruct && this.isTypeTagString(typeTag)) {
+      return de.deserializeStr();
+    }
+
+    throw new Error("Unable to decode BCS value");
+  }
+
+  private decodeBCSResponse(
+    struct: Gen.MoveStruct,
+    de: BCS.Deserializer,
+    structMap: Map<string, Gen.MoveStruct>,
+    result: Record<string, any> = {},
+  ) {
+    struct.fields.forEach((field) => {
+      const typeTagParser = new TypeTagParser(field.type);
+      const typeTag = typeTagParser.parseTypeTag({ skipTypeArg: true });
+      if (typeTag instanceof TypeTagStruct && !this.isTypeTagString(typeTag)) {
+        // eslint-disable-next-line no-param-reassign
+        result[field.name] = {};
+        this.decodeBCSResponse(structMap.get(typeTag.fullName), de, structMap, result[field.name]);
+      } else {
+        // eslint-disable-next-line no-param-reassign
+        result[field.name] = this.decodeBCSVal(de, typeTag);
+      }
+    });
   }
 
   /**
@@ -166,17 +300,33 @@ export class AptosClient {
     resourceType: Gen.MoveStructTag,
     query?: { ledgerVersion?: BigInt | number },
   ): Promise<Gen.MoveResource> {
-    return this.client.accounts.getAccountResource(
+    const structMap = new Map<string, Gen.MoveStruct>();
+    await this.fetchABICascaded(HexString.ensure(accountAddress).toShortString(), structMap);
+
+    const bcsPayload = await this.getClient({ HEADERS: { Accept: "application/x-bcs" } }).accounts.getAccountResource(
       HexString.ensure(accountAddress).hex(),
       resourceType,
       query?.ledgerVersion?.toString(),
     );
+
+    const de = new BCS.Deserializer(bcsPayload as any);
+
+    const typeTagParser = new TypeTagParser(resourceType);
+    const resource = typeTagParser.parseTypeTag() as TypeTagStruct;
+    const resourceABI = structMap.get(resource.fullName);
+
+    const result = {};
+    this.decodeBCSResponse(resourceABI, de, structMap, result);
+
+    return {
+      type: resourceType,
+      data: result,
+    };
   }
 
   /** Generates a signed transaction that can be submitted to the chain for execution. */
   static generateBCSTransaction(accountFrom: AptosAccount, rawTxn: TxnBuilderTypes.RawTransaction): Uint8Array {
     const txnBuilder = new TransactionBuilderEd25519((signingMessage: TxnBuilderTypes.SigningMessage) => {
-      // @ts-ignore
       const sigHexStr = accountFrom.signBuffer(signingMessage);
       return new TxnBuilderTypes.Ed25519Signature(sigHexStr.toUint8Array());
     }, accountFrom.pubKey().toUint8Array());

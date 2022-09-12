@@ -149,7 +149,7 @@ export class TypeTagParser {
     return res;
   }
 
-  parseTypeTag(): TypeTag {
+  parseTypeTag(options: { skipTypeArg: boolean } = { skipTypeArg: false }): TypeTag {
     if (this.tokens.length === 0) {
       bail("Invalid type tag.");
     }
@@ -193,7 +193,7 @@ export class TypeTagParser {
 
       let tyTags: TypeTag[] = [];
       // Check if the struct has ty args
-      if (this.tokens.length > 0 && this.tokens[0][1] === "<") {
+      if (!options.skipTypeArg && this.tokens.length > 0 && this.tokens[0][1] === "<") {
         this.consume("<");
         tyTags = this.parseCommaList(">", true);
         this.consume(">");
