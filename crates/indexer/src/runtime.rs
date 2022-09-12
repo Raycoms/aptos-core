@@ -8,7 +8,8 @@ use crate::{
         transaction_processor::TransactionProcessor,
     },
     processors::{
-        default_processor::DefaultTransactionProcessor, token_processor::TokenTransactionProcessor,
+        default_processor::DefaultTransactionProcessor,
+        // token_processor::TokenTransactionProcessor,
         Processor,
     },
 };
@@ -121,10 +122,10 @@ pub async fn run_forever(config: IndexerConfig, context: Arc<Context>) {
         Processor::DefaultProcessor => {
             Arc::new(DefaultTransactionProcessor::new(conn_pool.clone()))
         }
-        Processor::TokenProcessor => Arc::new(TokenTransactionProcessor::new(
-            conn_pool.clone(),
-            config.index_token_uri_data,
-        )),
+        // Processor::TokenProcessor => Arc::new(TokenTransactionProcessor::new(
+        //     conn_pool.clone(),
+        //     config.index_token_uri_data,
+        // )),
     };
 
     let options = TransactionFetcherOptions::new(
