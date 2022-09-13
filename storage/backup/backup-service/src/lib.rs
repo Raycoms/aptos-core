@@ -25,7 +25,7 @@ pub fn start_backup_service(address: SocketAddr, db: Arc<AptosDB>) -> Runtime {
             let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
             format!("backup-{}", id)
         })
-        .disable_lifo_slot()
+        .disable_lifo_slot
         .enable_all()
         .build()
         .expect("[backup] failed to create runtime");
